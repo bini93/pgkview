@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
-from typing import Dict, Set
 
 from pkgview.detectors.base import Detector
 from pkgview.models import Package
 
 
-def _brew_cask_names() -> Set[str]:
+def _brew_cask_names() -> set[str]:
     """Return the set of cask names currently managed by Homebrew."""
     try:
         result = subprocess.run(
@@ -19,7 +19,7 @@ def _brew_cask_names() -> Set[str]:
         )
         if result.returncode == 0:
             return {line.strip().lower() for line in result.stdout.splitlines() if line.strip()}
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError):
         pass
     return set()
 
@@ -40,15 +40,19 @@ class MacOsAppsDetector(Detector):
     def name(self) -> str:
         return "macos_apps"
 
-    def detect(self) -> Dict[str, Package]:
-        packages: Dict[str, Package] = {}
+    def detect(self) -> dict[str, Package]:
+        packages: dict[str, Package] = {}
 
         # Only relevant on macOS
-        if not Path("/Applications").exists():
+        if sys.platform != "darwin":
             return {}
 
         brew_casks = self._brew_casks if self._brew_casks is not None else _brew_cask_names()
-        scan_dirs = [Path("/Applications"), Path.home() / "Applications"]
+        scan_dirs = [
+            Path("/Applications"),
+            Path("/Applications/Utilities"),
+            Path.home() / "Applications",
+        ]
 
         for scan_dir in scan_dirs:
             if not scan_dir.is_dir():
@@ -58,6 +62,8 @@ class MacOsAppsDetector(Detector):
                     if entry.suffix != ".app":
                         continue
                     app_name = entry.stem
+                    # Known limitation: simple heuristic; fails for casks
+                    # whose name differs from the app name (e.g. "1password").
                     normalized = app_name.lower().replace(" ", "-")
                     manager = "brew-cask" if normalized in brew_casks else "manual"
                     packages[app_name] = Package(
@@ -66,7 +72,7 @@ class MacOsAppsDetector(Detector):
                         path=str(entry),
                         category="app",
                     )
-            except (PermissionError, OSError):
+            except OSError:
                 pass
 
         return packages
