@@ -51,6 +51,7 @@ dmypy.json
 # Local planning / notes (keep locally, not in repo)
 *.md
 !README.md
+!DEVELOPMENT.md
 
 # Logs
 *.log

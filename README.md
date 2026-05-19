@@ -34,29 +34,36 @@ Total: 75 programs  │  57 managed  │  18 manual
 
 ## Installation
 
-### Option A – editable install for development
+### Recommended – install with pipx (no venv needed)
+
+[pipx](https://pipx.pypa.io) installs CLI tools in an isolated environment automatically.
 
 ```bash
-git clone https://github.com/yourname/pgkview.git
-cd pgkview
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .
+# Install pipx once (macOS)
+brew install pipx
+pipx ensurepath
+
+# Install pkgview directly from GitHub
+pipx install git+https://github.com/yourname/pkgview.git
 ```
 
-The `pkgview` command is now available inside the venv.
+The `pkgview` command is immediately available system-wide.
 
-### Option B – install directly with pip (once published)
+**Update to the latest version:**
+
+```bash
+pipx upgrade pkgview
+```
+
+### Alternative – with pip (once published on PyPI)
 
 ```bash
 pip install pkgview
-```
-
-### Option C – with uv (if available)
-
-```bash
+# or
 uv tool install pkgview
 ```
+
+> For development setup, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Usage
 
@@ -220,6 +227,8 @@ No test suite yet — contributions welcome.
 - [ ] Windows support (winget, scoop, chocolatey)
 - [ ] TUI mode with [Textual](https://textual.textualize.io/) (`pkgview --tui`)
 - [ ] Docker Desktop, VS Code extension detection
+- [ ] Publish to [PyPI](https://pypi.org) — `pipx install pkgview` without GitHub URL
+- [ ] [Homebrew Tap](https://docs.brew.sh/Tap-Migrating-to-a-New-Package) — `brew install yourname/tap/pkgview`
 
 ## License
 
