@@ -18,7 +18,7 @@ MANAGED_MANAGERS: frozenset[str] = frozenset({
     # Linux universal
     "snap", "flatpak",
     # Data Science
-    "conda", "mamba",
+    "conda", "mamba", "micromamba",
     # Arch Linux
     "pacman", "yay",
     # Fedora / RHEL

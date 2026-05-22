@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from pkgview.detectors.base import Detector
 from pkgview.models import Package
 
 
-def _conda_list(cmd: str) -> List[Dict]:
+def _mamba_list(cmd: str) -> List[Dict]:
     """Run ``cmd list --json`` and return the parsed list. Never raises."""
     try:
         result = subprocess.run(
@@ -24,23 +24,34 @@ def _conda_list(cmd: str) -> List[Dict]:
         return []
 
 
-class CondaDetector(Detector):
-    """
-    Detects packages installed in the active conda environment.
+# Candidates in preference order: micromamba first (standalone, no conda dep),
+# then mamba (requires conda base env).
+_CANDIDATES: Tuple[str, ...] = ("micromamba", "mamba")
 
-    Only queries the ``conda`` binary. Packages managed by mamba or
-    micromamba are handled by the dedicated MambaDetector.
+
+class MambaDetector(Detector):
+    """
+    Detects packages installed in the active mamba / micromamba environment.
+
+    Tries micromamba first, then mamba. The manager label reflects whichever
+    tool responded. Packages that came via pip inside the environment are
+    excluded (channel == "pypi") to avoid double-counting with PipDetector.
     """
 
     @property
     def name(self) -> str:
-        return "conda"
+        return "mamba"
 
     def detect(self) -> Dict[str, Package]:
         packages: Dict[str, Package] = {}
-        manager_label = "conda"
+        items: List[Dict] = []
+        manager_label = "mamba"
 
-        items = _conda_list("conda")
+        for cmd in _CANDIDATES:
+            items = _mamba_list(cmd)
+            if items:
+                manager_label = cmd  # "micromamba" or "mamba"
+                break
 
         for item in items:
             name = item.get("name", "").strip()
@@ -48,7 +59,6 @@ class CondaDetector(Detector):
             channel = item.get("channel", "")
             if not name:
                 continue
-            # Skip packages that came from pip inside the conda env
             if channel in ("pypi",):
                 continue
             packages[name] = Package(

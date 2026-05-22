@@ -10,6 +10,7 @@ from pkgview.detectors.brew import BrewDetector, _run, _versions
 from pkgview.detectors.npm import NpmDetector
 from pkgview.detectors.pip import PipDetector, _pip_packages, _pipx_packages
 from pkgview.detectors.cargo import CargoDetector
+from pkgview.detectors.mamba import MambaDetector, _mamba_list
 from pkgview.detectors.manual import ManualDetector, SYSTEM_PATHS
 from pkgview.models import Package
 
@@ -364,3 +365,100 @@ class TestManualDetector:
         with patch.dict("os.environ", {"PATH": "/does/not/exist"}, clear=True):
             result = ManualDetector(managed={}).detect()
         assert result == {}
+
+
+# ── MambaDetector ─────────────────────────────────────────────────────────────
+
+_MAMBA_JSON = json.dumps([
+    {"name": "numpy", "version": "1.26.4", "channel": "conda-forge"},
+    {"name": "pandas", "version": "2.2.1", "channel": "conda-forge"},
+    {"name": "pip-only", "version": "1.0", "channel": "pypi"},
+])
+
+
+class TestMambaList:
+    def test_returns_parsed_list_on_success(self):
+        with patch("pkgview.detectors.mamba.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed(_MAMBA_JSON)
+            result = _mamba_list("mamba")
+        assert len(result) == 3
+        assert result[0]["name"] == "numpy"
+
+    def test_returns_empty_on_nonzero_returncode(self):
+        with patch("pkgview.detectors.mamba.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("", returncode=1)
+            result = _mamba_list("mamba")
+        assert result == []
+
+    def test_returns_empty_on_file_not_found(self):
+        with patch("pkgview.detectors.mamba.subprocess.run", side_effect=FileNotFoundError):
+            result = _mamba_list("mamba")
+        assert result == []
+
+    def test_returns_empty_on_timeout(self):
+        with patch(
+            "pkgview.detectors.mamba.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("mamba", 60),
+        ):
+            result = _mamba_list("mamba")
+        assert result == []
+
+    def test_returns_empty_on_invalid_json(self):
+        with patch("pkgview.detectors.mamba.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("not json")
+            result = _mamba_list("mamba")
+        assert result == []
+
+
+class TestMambaDetectorDetect:
+    def test_uses_micromamba_first(self):
+        call_counts: dict = {"micromamba": 0, "mamba": 0}
+
+        def side_effect(cmd, **kwargs):
+            name = cmd[0]
+            call_counts[name] = call_counts.get(name, 0) + 1
+            if name == "micromamba":
+                return _make_completed(_MAMBA_JSON)
+            return _make_completed("[]")
+
+        with patch("pkgview.detectors.mamba.subprocess.run", side_effect=side_effect):
+            result = MambaDetector().detect()
+
+        assert call_counts["micromamba"] == 1
+        assert call_counts.get("mamba", 0) == 0
+        assert result["numpy"].manager == "micromamba"
+
+    def test_falls_back_to_mamba_when_micromamba_missing(self):
+        def side_effect(cmd, **kwargs):
+            if cmd[0] == "micromamba":
+                raise FileNotFoundError
+            return _make_completed(_MAMBA_JSON)
+
+        with patch("pkgview.detectors.mamba.subprocess.run", side_effect=side_effect):
+            result = MambaDetector().detect()
+
+        assert "numpy" in result
+        assert result["numpy"].manager == "mamba"
+
+    def test_excludes_pypi_packages(self):
+        with patch("pkgview.detectors.mamba.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed(_MAMBA_JSON)
+            result = MambaDetector().detect()
+        assert "pip-only" not in result
+
+    def test_returns_empty_when_neither_tool_found(self):
+        with patch("pkgview.detectors.mamba.subprocess.run", side_effect=FileNotFoundError):
+            result = MambaDetector().detect()
+        assert result == {}
+
+    def test_package_fields(self):
+        with patch("pkgview.detectors.mamba.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed(_MAMBA_JSON)
+            result = MambaDetector().detect()
+        pkg = result["pandas"]
+        assert pkg.version == "2.2.1"
+        assert pkg.category == "cli"
+
+    def test_name_property(self):
+        assert MambaDetector().name == "mamba"
+

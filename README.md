@@ -19,13 +19,15 @@ Total: 75 programs  │  57 managed  │  18 manual
 
 ## Features
 
-- Detects programs from: **brew**, **brew-cask**, **npm** (global), **pip**, **pipx**, **cargo**, **apt**, **snap**, **flatpak**
+- Detects programs from: **brew**, **brew-cask**, **npm** (global), **pip**, **pipx**, **cargo**, **apt**, **snap**, **flatpak**, **conda** / **mamba**, **pacman**, **dnf** / **yum**, **apk**, **nix**, **gem**, **composer**, **winget**, **scoop**, **chocolatey**, **nvm**, **asdf**, **pyenv**
 - Scans `/Applications` and `~/Applications` on macOS for GUI apps
 - Marks everything not tracked by a package manager as `manual`
 - Correctly ignores macOS/Linux system binaries (`/bin`, `/usr/bin`, etc.)
 - Correctly ignores Homebrew sub-binaries (e.g. `dart` from the `flutter` cask)
 - All detectors run **in parallel** — fast even with many package managers installed
 - Outputs a color-coded table or raw JSON (`--json`)
+- Check for available updates with `--outdated`
+- Export snapshots to JSON or CSV with `--export`
 
 ## Requirements
 

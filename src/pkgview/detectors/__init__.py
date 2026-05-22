@@ -6,6 +6,7 @@ from pkgview.detectors.apt import AptDetector
 from pkgview.detectors.snap import SnapDetector
 from pkgview.detectors.flatpak import FlatpakDetector
 from pkgview.detectors.conda import CondaDetector
+from pkgview.detectors.mamba import MambaDetector
 from pkgview.detectors.pacman import PacmanDetector
 from pkgview.detectors.dnf import DnfDetector
 from pkgview.detectors.apk import ApkDetector
@@ -30,6 +31,7 @@ __all__ = [
     "SnapDetector",
     "FlatpakDetector",
     "CondaDetector",
+    "MambaDetector",
     "PacmanDetector",
     "DnfDetector",
     "ApkDetector",
