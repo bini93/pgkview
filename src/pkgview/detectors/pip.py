@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from typing import Dict, List
 
 from pkgview.detectors.base import Detector
@@ -12,7 +11,7 @@ from pkgview.models import Package
 def _pip_packages() -> List[Dict]:
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "list", "--format=json"],
+            ["pip", "list", "--format=json"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -78,3 +77,24 @@ class PipDetector(Detector):
                 )
 
         return packages
+
+    def check_outdated(self, packages: Dict[str, Package]) -> None:
+        """Uses ``pip list --outdated --format=json`` to find outdated packages."""
+        try:
+            result = subprocess.run(
+                ["pip", "list", "--outdated", "--format=json"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                return
+            data = json.loads(result.stdout)
+            for item in data:
+                name = item.get("name", "").lower()
+                latest = item.get("latest_version")
+                if name in packages and latest:
+                    packages[name].outdated = True
+                    packages[name].latest_version = latest
+        except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            pass

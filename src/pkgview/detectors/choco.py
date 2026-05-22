@@ -7,31 +7,39 @@ from pkgview.detectors.base import Detector
 from pkgview.models import Package
 
 
-class SnapDetector(Detector):
+class ChocoDetector(Detector):
+    """Detects packages installed via Chocolatey (Windows)."""
+
     @property
     def name(self) -> str:
-        return "snap"
+        return "chocolatey"
 
     def detect(self) -> Dict[str, Package]:
         packages: Dict[str, Package] = {}
         try:
             result = subprocess.run(
-                ["snap", "list"],
+                ["choco", "list", "--local-only", "--no-progress"],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0:
                 return {}
-            lines = result.stdout.splitlines()
-            # Skip the header line: "Name  Version  Rev  Tracking  Publisher  Notes"
-            for line in lines[1:]:
-                parts = line.split()
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                # Skip footer lines like "X packages installed."
+                if "package" in stripped.lower() and "installed" in stripped.lower():
+                    continue
+                parts = stripped.split()
                 if len(parts) >= 2:
                     name, version = parts[0], parts[1]
                     packages[name] = Package(
                         name=name,
-                        manager="snap",
+                        manager="chocolatey",
                         version=version,
                         category="cli",
                     )
@@ -40,21 +48,23 @@ class SnapDetector(Detector):
         return packages
 
     def check_outdated(self, packages: Dict[str, Package]) -> None:
-        """Uses ``snap refresh --list`` to find snaps with available updates."""
+        """Uses ``choco outdated`` to find packages with available updates."""
         try:
             result = subprocess.run(
-                ["snap", "refresh", "--list"],
+                ["choco", "outdated", "--no-progress"],
                 capture_output=True,
                 text=True,
                 timeout=60,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0:
                 return
-            lines = result.stdout.splitlines()
-            for line in lines[1:]:  # skip header
-                parts = line.split()
-                if len(parts) >= 2:
-                    name, latest = parts[0], parts[1]
+            for line in result.stdout.splitlines():
+                # Format: "package_name|current_version|latest_version|pinned"
+                parts = line.strip().split("|")
+                if len(parts) >= 3:
+                    name, _current, latest = parts[0], parts[1], parts[2]
                     if name in packages:
                         packages[name].outdated = True
                         packages[name].latest_version = latest

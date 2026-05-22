@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Type
 
@@ -15,12 +16,26 @@ from pkgview.detectors.cargo import CargoDetector
 from pkgview.detectors.apt import AptDetector
 from pkgview.detectors.snap import SnapDetector
 from pkgview.detectors.flatpak import FlatpakDetector
+from pkgview.detectors.conda import CondaDetector
+from pkgview.detectors.pacman import PacmanDetector
+from pkgview.detectors.dnf import DnfDetector
+from pkgview.detectors.apk import ApkDetector
+from pkgview.detectors.nix import NixDetector
+from pkgview.detectors.gem import GemDetector
+from pkgview.detectors.composer import ComposerDetector
+from pkgview.detectors.winget import WingetDetector
+from pkgview.detectors.scoop import ScoopDetector
+from pkgview.detectors.choco import ChocoDetector
+from pkgview.detectors.nvm import NvmDetector
+from pkgview.detectors.asdf import AsdfDetector
+from pkgview.detectors.pyenv import PyenvDetector
 from pkgview.detectors.macos_apps import MacOsAppsDetector
 from pkgview.detectors.manual import ManualDetector
 from pkgview import __version__
 from pkgview.models import Package, MANAGED_MANAGERS
 from pkgview.output.table import render_table
 from pkgview.output.json_out import render_json
+from pkgview.output.csv_out import render_csv
 
 app = typer.Typer(
     help="[bold]pkgview[/bold] – list all installed programs and who manages them.",
@@ -39,6 +54,19 @@ INDEPENDENT_DETECTORS: List[Type[Detector]] = [
     AptDetector,
     SnapDetector,
     FlatpakDetector,
+    CondaDetector,
+    PacmanDetector,
+    DnfDetector,
+    ApkDetector,
+    NixDetector,
+    GemDetector,
+    ComposerDetector,
+    WingetDetector,
+    ScoopDetector,
+    ChocoDetector,
+    NvmDetector,
+    AsdfDetector,
+    PyenvDetector,
 ]
 
 VALID_SORT_KEYS = {"name", "manager", "version"}
@@ -72,6 +100,19 @@ def main(
         "--paths",
         "-p",
         help="Add a Path column to the table.",
+    ),
+    check_outdated: bool = typer.Option(
+        False,
+        "--outdated",
+        "-o",
+        help="Check each package manager for available updates and highlight outdated packages.",
+    ),
+    export_path: Optional[str] = typer.Option(
+        None,
+        "--export",
+        "-e",
+        help="Save snapshot to file. Format is auto-detected from the extension: "
+             "[cyan].csv[/cyan] for CSV, anything else (e.g. [cyan].json[/cyan]) for JSON.",
     ),
     version: bool = typer.Option(
         False,
@@ -113,7 +154,7 @@ def main(
         # Note: INDEPENDENT_DETECTORS holds direct class references; patch the
         # list itself (pkgview.cli.INDEPENDENT_DETECTORS) in tests, not the
         # individual class names.
-        with ThreadPoolExecutor(max_workers=len(INDEPENDENT_DETECTORS)) as executor:
+        with ThreadPoolExecutor(max_workers=min(len(INDEPENDENT_DETECTORS), 8)) as executor:
             futures = {
                 executor.submit(cls().detect): cls.__name__
                 for cls in INDEPENDENT_DETECTORS
@@ -148,6 +189,43 @@ def main(
             except Exception as exc:
                 _warnings.append(f"[yellow]Warning: ManualDetector failed: {exc}[/yellow]")
 
+        # ── Phase 4: outdated checks (optional, parallel) ────────────────────
+        if check_outdated:
+            progress.update(task, description="Checking for updates …")
+            detector_instances = [cls() for cls in INDEPENDENT_DETECTORS]
+            tasks_outdated = [
+                (det, {k: v for k, v in all_packages.items() if v.manager == det.name})
+                for det in detector_instances
+            ]
+            # Also check brew-cask via BrewDetector (same instance handles both managers)
+            brew_det = next(
+                (det for det in detector_instances if isinstance(det, BrewDetector)), None
+            )
+            if brew_det:
+                cask_pkgs = {k: v for k, v in all_packages.items() if v.manager == "brew-cask"}
+                if cask_pkgs:
+                    # Merge brew-cask into the brew detector's package dict
+                    for idx, (det, pkgs) in enumerate(tasks_outdated):
+                        if isinstance(det, BrewDetector):
+                            pkgs.update(cask_pkgs)
+                            break
+
+            max_workers = min(len(tasks_outdated), 8) or 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures_out = {
+                    executor.submit(det.check_outdated, pkgs): det.name
+                    for det, pkgs in tasks_outdated
+                    if pkgs  # skip detectors that found nothing
+                }
+                for future in as_completed(futures_out):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        _warnings.append(
+                            f"[yellow]Warning: outdated check for "
+                            f"{futures_out[future]} failed: {exc}[/yellow]"
+                        )
+
     for w in _warnings:
         console.print(w)
 
@@ -165,11 +243,26 @@ def main(
     else:  # default: manager
         packages.sort(key=lambda p: (p.manager, p.name.lower()))
 
+    # ── Export ───────────────────────────────────────────────────────────────
+    if export_path:
+        out = pathlib.Path(export_path)
+        if out.suffix.lower() == ".csv":
+            content = render_csv(packages)
+        else:
+            content = render_json(packages)
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            console.print(f"[red]Could not write to [bold]{out}[/bold]: {exc}[/red]")
+            raise typer.Exit(code=1)
+        console.print(f"[green]Snapshot saved to [bold]{out}[/bold][/green]")
+
     # ── Render ───────────────────────────────────────────────────────────────
     if as_json:
         print(render_json(packages))
     else:
-        render_table(packages, console, show_paths=show_paths)
+        render_table(packages, console, show_paths=show_paths, show_outdated=check_outdated)
 
 
 def run() -> None:

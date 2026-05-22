@@ -32,3 +32,25 @@ class AptDetector(Detector):
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             pass
         return packages
+
+    def check_outdated(self, packages: Dict[str, Package]) -> None:
+        """Uses ``apt list --upgradable`` to find packages with available updates."""
+        try:
+            result = subprocess.run(
+                ["apt", "list", "--upgradable"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            for line in result.stdout.splitlines():
+                # Format: "package/source version arch [upgradable from: old_ver]"
+                if "/" not in line:
+                    continue
+                name = line.split("/")[0].strip()
+                parts = line.split()
+                latest = parts[1] if len(parts) >= 2 else None
+                if name in packages and latest:
+                    packages[name].outdated = True
+                    packages[name].latest_version = latest
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass

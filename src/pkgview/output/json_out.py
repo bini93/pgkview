@@ -12,9 +12,11 @@ def render_json(packages: List[Package]) -> str:
             "name": pkg.name,
             "manager": pkg.manager,
             "version": pkg.version,
+            "latest_version": pkg.latest_version,
             "path": pkg.path,
             "category": pkg.category,
             "managed": pkg.is_managed,
+            "outdated": pkg.outdated,
         }
         for pkg in packages
     ]

@@ -7,16 +7,23 @@ from pkgview.detectors.base import Detector
 from pkgview.models import Package
 
 
-class FlatpakDetector(Detector):
+class PacmanDetector(Detector):
+    """
+    Detects explicitly-installed packages on Arch-based Linux (pacman / yay).
+
+    Uses ``pacman -Qe`` which lists only packages the user explicitly
+    requested, not auto-installed dependencies.
+    """
+
     @property
     def name(self) -> str:
-        return "flatpak"
+        return "pacman"
 
     def detect(self) -> Dict[str, Package]:
         packages: Dict[str, Package] = {}
         try:
             result = subprocess.run(
-                ["flatpak", "list", "--app", "--columns=name,version"],
+                ["pacman", "-Qe"],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -24,42 +31,36 @@ class FlatpakDetector(Detector):
             if result.returncode != 0:
                 return {}
             for line in result.stdout.splitlines():
-                parts = line.split("\t")
-                if not parts:
-                    continue
-                name = parts[0].strip()
-                version = parts[1].strip() if len(parts) > 1 else None
-                if name:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    name, version = parts[0], parts[1]
                     packages[name] = Package(
                         name=name,
-                        manager="flatpak",
+                        manager="pacman",
                         version=version,
-                        category="app",
+                        category="cli",
                     )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             pass
         return packages
 
     def check_outdated(self, packages: Dict[str, Package]) -> None:
-        """Uses ``flatpak remote-ls --updates`` to find apps with available updates."""
+        """Uses ``checkupdates`` (pacman-contrib) to find available updates."""
         try:
             result = subprocess.run(
-                ["flatpak", "remote-ls", "--updates", "--app",
-                 "--columns=name,version"],
+                ["checkupdates"],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
-            if result.returncode != 0:
-                return
+            # checkupdates exits 1 when there are no updates (not an error)
             for line in result.stdout.splitlines():
-                parts = line.split("\t")
-                if not parts:
-                    continue
-                name = parts[0].strip()
-                latest = parts[1].strip() if len(parts) > 1 else None
-                if name in packages:
-                    packages[name].outdated = True
-                    packages[name].latest_version = latest
+                # Format: "package old_version -> new_version"
+                parts = line.strip().split()
+                if len(parts) >= 4:
+                    name, latest = parts[0], parts[3]
+                    if name in packages:
+                        packages[name].outdated = True
+                        packages[name].latest_version = latest
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             pass

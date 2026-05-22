@@ -8,54 +8,55 @@ from pkgview.detectors.base import Detector
 from pkgview.models import Package
 
 
-class NpmDetector(Detector):
+class ComposerDetector(Detector):
+    """Detects globally installed PHP Composer packages."""
+
     @property
     def name(self) -> str:
-        return "npm"
+        return "composer"
 
     def detect(self) -> Dict[str, Package]:
         packages: Dict[str, Package] = {}
         try:
             result = subprocess.run(
-                ["npm", "list", "-g", "--depth=0", "--json"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            # npm exits non-zero when there are peer dep warnings; parse anyway.
-            # Guard against an empty body (e.g. no global packages installed).
-            if not result.stdout.strip():
-                return {}
-            data = json.loads(result.stdout)
-            for pkg_name, info in data.get("dependencies", {}).items():
-                version: str | None = info.get("version") if isinstance(info, dict) else None
-                packages[pkg_name] = Package(
-                    name=pkg_name,
-                    manager="npm",
-                    version=version,
-                    category="cli",
-                )
-        except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, OSError):
-            pass
-        return packages
-
-    def check_outdated(self, packages: Dict[str, Package]) -> None:
-        """Uses ``npm outdated -g --json`` to find globally outdated packages."""
-        try:
-            result = subprocess.run(
-                ["npm", "outdated", "-g", "--json"],
+                ["composer", "global", "show", "--format=json", "--no-interaction"],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
-            # npm outdated exits 1 when there are outdated packages — that's OK
-            if not result.stdout.strip():
+            if result.returncode != 0:
+                return {}
+            data = json.loads(result.stdout)
+            for item in data.get("installed", []):
+                name = item.get("name", "").strip()
+                version = item.get("version")
+                if not name:
+                    continue
+                packages[name] = Package(
+                    name=name,
+                    manager="composer",
+                    version=version,
+                    category="cli",
+                )
+        except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            pass
+        return packages
+
+    def check_outdated(self, packages: Dict[str, Package]) -> None:
+        """Uses ``composer global outdated --format=json`` to find updates."""
+        try:
+            result = subprocess.run(
+                ["composer", "global", "outdated", "--format=json", "--no-interaction"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode not in (0, 1):
                 return
             data = json.loads(result.stdout)
-            for name, info in data.items():
-                if not isinstance(info, dict):
-                    continue
-                latest = info.get("latest") or info.get("wanted")
+            for item in data.get("installed", []):
+                name = item.get("name", "")
+                latest = item.get("latest")
                 if name in packages and latest:
                     packages[name].outdated = True
                     packages[name].latest_version = latest

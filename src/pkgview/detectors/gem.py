@@ -7,31 +7,40 @@ from pkgview.detectors.base import Detector
 from pkgview.models import Package
 
 
-class SnapDetector(Detector):
+class GemDetector(Detector):
+    """Detects globally installed Ruby gems."""
+
     @property
     def name(self) -> str:
-        return "snap"
+        return "gem"
 
     def detect(self) -> Dict[str, Package]:
         packages: Dict[str, Package] = {}
         try:
             result = subprocess.run(
-                ["snap", "list"],
+                ["gem", "list", "--no-verbose"],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
             if result.returncode != 0:
                 return {}
-            lines = result.stdout.splitlines()
-            # Skip the header line: "Name  Version  Rev  Tracking  Publisher  Notes"
-            for line in lines[1:]:
-                parts = line.split()
-                if len(parts) >= 2:
-                    name, version = parts[0], parts[1]
+            for line in result.stdout.splitlines():
+                # Format: "gem_name (version1, version2)"
+                line = line.strip()
+                if not line or line.startswith("***"):
+                    continue
+                if "(" in line:
+                    name = line[: line.index("(")].strip()
+                    versions_str = line[line.index("(") + 1: line.index(")")]
+                    version = versions_str.split(",")[0].strip()
+                else:
+                    name = line
+                    version = None
+                if name:
                     packages[name] = Package(
                         name=name,
-                        manager="snap",
+                        manager="gem",
                         version=version,
                         category="cli",
                     )
@@ -40,21 +49,23 @@ class SnapDetector(Detector):
         return packages
 
     def check_outdated(self, packages: Dict[str, Package]) -> None:
-        """Uses ``snap refresh --list`` to find snaps with available updates."""
+        """Uses ``gem outdated`` to find gems with available updates."""
         try:
             result = subprocess.run(
-                ["snap", "refresh", "--list"],
+                ["gem", "outdated"],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
             if result.returncode != 0:
                 return
-            lines = result.stdout.splitlines()
-            for line in lines[1:]:  # skip header
-                parts = line.split()
-                if len(parts) >= 2:
-                    name, latest = parts[0], parts[1]
+            for line in result.stdout.splitlines():
+                # Format: "gem_name (current < latest)"
+                if "(" in line and "<" in line:
+                    name = line[: line.index("(")].strip()
+                    inner = line[line.index("(") + 1: line.index(")")]
+                    parts = inner.split("<")
+                    latest = parts[1].strip() if len(parts) > 1 else None
                     if name in packages:
                         packages[name].outdated = True
                         packages[name].latest_version = latest

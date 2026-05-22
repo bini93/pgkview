@@ -24,3 +24,14 @@ class Detector(ABC):
         so that one broken detector cannot crash the whole tool.
         """
         ...
+
+    def check_outdated(self, packages: Dict[str, Package]) -> None:
+        """
+        Optionally update packages in-place with outdated / latest_version info.
+
+        ``packages`` contains only the packages belonging to this detector.
+        Implementations should set ``pkg.outdated = True`` and
+        ``pkg.latest_version = "<new_version>"`` for each outdated package.
+
+        Must never raise exceptions. Default implementation is a no-op.
+        """

@@ -63,7 +63,7 @@ pip install pkgview
 uv tool install pkgview
 ```
 
-> For development setup, see [DEVELOPMENT.md](DEVELOPMENT.md).
+> For development setup, project structure, and contribution guidelines, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Usage
 
@@ -73,12 +73,15 @@ pkgview [OPTIONS]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--filter TEXT` | `-f` | – | Show only programs from one manager.<br>Values: `brew`, `brew-cask`, `npm`, `pip`, `pipx`, `cargo`, `apt`, `snap`, `flatpak`, `manual` |
+| `--filter TEXT` | `-f` | – | Show only programs from one manager.<br>Values: `brew`, `brew-cask`, `npm`, `pip`, `pipx`, `cargo`, `apt`, `snap`, `flatpak`, `conda`, `mamba`, `pacman`, `yay`, `dnf`, `yum`, `zypper`, `apk`, `nix`, `gem`, `composer`, `winget`, `scoop`, `chocolatey`, `nvm`, `asdf`, `pyenv`, `manual` |
 | `--sort TEXT` | `-s` | `manager` | Sort column: `name`, `manager`, `version` |
 | `--json` | `-j` | off | Output raw JSON instead of a table |
 | `--paths` | `-p` | off | Add a Path column to the table |
+| `--outdated` | `-o` | off | Check for available updates; highlight outdated packages in red |
+| `--export PATH` | `-e` | – | Save snapshot to file (`.csv` → CSV, everything else → JSON) |
 | `--no-apps` | – | off | Exclude GUI apps (`/Applications`) |
 | `--no-manual` | – | off | Hide manually installed programs |
+| `--version` | `-V` | – | Show version and exit |
 | `--help` | – | – | Show help and exit |
 
 ### Examples
@@ -116,115 +119,31 @@ pkgview --no-apps --no-manual
 | 🐧 | `apt` | Linux (Debian/Ubuntu) | `apt-mark showmanual` |
 | 🐧 | `snap` | Linux | `snap list` |
 | 🐧 | `flatpak` | Linux | `flatpak list --app` |
-| ⚠ | `manual` | macOS, Linux | PATH scan (cross-referenced) |
+| 🐍 | `conda` / `mamba` | macOS, Linux | `conda list --json` / `mamba list --json` |
+| 🐧 | `pacman` | Linux (Arch) | `pacman -Qe` |
+| 🐧 | `dnf` / `yum` | Linux (Fedora/RHEL) | `dnf repoquery --userinstalled` |
+| 🐧 | `apk` | Linux (Alpine) | `apk list --installed` |
+| ❄  | `nix` | macOS, Linux | `nix-env -q` |
+| 💎 | `gem` | macOS, Linux | `gem list --no-verbose` |
+| 🎵 | `composer` | macOS, Linux | `composer global show --format=json` |
+| 🪟 | `winget` | Windows | `winget list --source winget` |
+| 🪟 | `scoop` | Windows | `scoop list` |
+| 🍫 | `chocolatey` | Windows | `choco list --local-only` |
+| 🟩 | `nvm` | macOS, Linux | scans `~/.nvm/versions/node/` |
+| 🔧 | `asdf` | macOS, Linux | scans `~/.asdf/installs/` |
+| 🐍 | `pyenv` | macOS, Linux | scans `~/.pyenv/versions/` |
+| ⚠  | `manual` | macOS, Linux | PATH scan (cross-referenced) |
 
 Missing package managers are silently skipped — no errors.
 
-## Project Structure
-
-```
-pgkview/
-├── pyproject.toml              ← packaging config, entry point: pkgview
-├── src/
-│   └── pkgview/
-│       ├── cli.py              ← typer app, all flags, parallel orchestration
-│       ├── models.py           ← Package dataclass
-│       ├── detectors/
-│       │   ├── base.py         ← abstract Detector class
-│       │   ├── brew.py
-│       │   ├── npm.py
-│       │   ├── pip.py
-│       │   ├── cargo.py
-│       │   ├── apt.py
-│       │   ├── snap.py
-│       │   ├── flatpak.py
-│       │   ├── macos_apps.py   ← scans /Applications
-│       │   └── manual.py       ← PATH scan, marks unknowns as "manual"
-│       └── output/
-│           ├── table.py        ← rich table renderer
-│           └── json_out.py     ← JSON renderer
-└── PLAN.md                     ← architecture decisions and future roadmap
-```
-
-## Adding a New Detector
-
-Adding support for a new package manager takes ~30 lines. Here is a minimal example:
-
-```python
-# src/pkgview/detectors/my_manager.py
-from __future__ import annotations
-
-import subprocess
-from typing import Dict
-
-from pkgview.detectors.base import Detector
-from pkgview.models import Package
-
-
-class MyManagerDetector(Detector):
-    @property
-    def name(self) -> str:
-        return "my_manager"
-
-    def detect(self) -> Dict[str, Package]:
-        packages: Dict[str, Package] = {}
-        try:
-            result = subprocess.run(
-                ["my_manager", "list"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode != 0:
-                return {}
-            for line in result.stdout.splitlines():
-                name = line.strip()
-                if name:
-                    packages[name] = Package(name=name, manager="my_manager")
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass
-        return packages
-```
-
-Then register it in `src/pkgview/cli.py`:
-
-```python
-from pkgview.detectors.my_manager import MyManagerDetector
-
-INDEPENDENT_DETECTORS = [
-    ...,
-    MyManagerDetector,   # ← add here
-]
-```
-
-And add a color/icon in `src/pkgview/output/table.py`:
-
-```python
-MANAGER_STYLES["my_manager"] = "bold green"
-MANAGER_ICONS["my_manager"]  = "🔧"
-```
-
-Also add the name to `VALID_MANAGERS` in `cli.py` so `--filter my_manager` works.
-
-## Development
-
-```bash
-# Install in editable mode
-pip install -e .
-
-# Run directly
-pkgview --help
-
-# Quick test (no GUI apps, sorted by name)
-pkgview --no-apps --sort name
-```
-
-No test suite yet — contributions welcome.
-
 ## Roadmap
 
-- [ ] `pkgview --outdated` — highlight packages with available updates
-- [ ] `pkgview --export` — save snapshot as JSON/CSV for system backups
-- [ ] nvm / asdf / pyenv detector
-- [ ] Windows support (winget, scoop, chocolatey)
+- [x] `pkgview --outdated` — highlight packages with available updates
+- [x] `pkgview --export` — save snapshot as JSON/CSV for system backups
+- [x] nvm / asdf / pyenv detector
+- [x] Windows support (winget, scoop, chocolatey)
+- [x] conda / mamba detector
+- [x] pacman / dnf / apk / nix / gem / composer detectors
 - [ ] TUI mode with [Textual](https://textual.textualize.io/) (`pkgview --tui`)
 - [ ] Docker Desktop, VS Code extension detection
 - [ ] Publish to [PyPI](https://pypi.org) — `pipx install pkgview` without GitHub URL
@@ -232,4 +151,4 @@ No test suite yet — contributions welcome.
 
 ## License
 
-MIT
+GPL-3.0-or-later — see [LICENSE](LICENSE) for details.
