@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import pathlib
+import time
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Type
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from pkgview.detectors.base import Detector
@@ -37,6 +40,20 @@ from pkgview.models import Package, MANAGED_MANAGERS
 from pkgview.output.table import render_table
 from pkgview.output.json_out import render_json
 from pkgview.output.csv_out import render_csv
+
+def _run_detector_timed(inst: Detector):
+    """Run a detector and return (packages, elapsed_seconds)."""
+    t0 = time.monotonic()
+    result = inst.detect()
+    return result, time.monotonic() - t0
+
+
+def _run_check_outdated_timed(det: Detector, pkgs: dict) -> float:
+    """Run check_outdated for a detector and return elapsed seconds."""
+    t0 = time.monotonic()
+    det.check_outdated(pkgs)
+    return time.monotonic() - t0
+
 
 app = typer.Typer(
     help="[bold]pkgview[/bold] – list all installed programs and who manages them.",
@@ -123,6 +140,12 @@ def main(
         help="Show version and exit.",
         is_eager=True,
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show each detector's name, package count, and elapsed time.",
+    ),
 ) -> None:
     if version:
         console.print(f"pkgview {__version__}")
@@ -144,33 +167,63 @@ def main(
     all_packages: dict[str, Package] = {}
     _warnings: list[str] = []
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("Scanning package managers …", total=None)
+    t_total = time.monotonic()
+
+    if verbose:
+        console.print("[bold]Scanning package managers…[/bold]")
+
+    _ctx = (
+        Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        )
+        if not verbose
+        else nullcontext()
+    )
+
+    with _ctx as progress:
+        task = progress.add_task("Scanning package managers …", total=None) if not verbose else None
 
         # ── Phase 1: independent detectors in parallel ──────────────────────
         # Note: INDEPENDENT_DETECTORS holds direct class references; patch the
         # list itself (pkgview.cli.INDEPENDENT_DETECTORS) in tests, not the
         # individual class names.
-        with ThreadPoolExecutor(max_workers=min(len(INDEPENDENT_DETECTORS), 8)) as executor:
+        _instances = [cls() for cls in INDEPENDENT_DETECTORS]
+        with ThreadPoolExecutor(max_workers=min(len(_instances), 8)) as executor:
             futures = {
-                executor.submit(cls().detect): cls.__name__
-                for cls in INDEPENDENT_DETECTORS
+                executor.submit(_run_detector_timed, inst): inst
+                for inst in _instances
             }
             for future in as_completed(futures):
+                inst = futures[future]
                 try:
-                    result = future.result()
+                    result, elapsed = future.result()
                     all_packages.update(result)
+                    if verbose:
+                        count = len(result)
+                        style = "cyan" if count else "dim"
+                        console.print(
+                            f"  [{style}]{inst.name}[/{style}]  "
+                            f"{count} package{'s' if count != 1 else ''}  "
+                            f"[dim]({elapsed:.2f}s)[/dim]"
+                        )
                 except Exception as exc:
-                    _warnings.append(f"[yellow]Warning: {futures[future]} failed: {exc}[/yellow]")
+                    _warnings.append(
+                        f"[yellow]Warning: {inst.name} failed: {escape(str(exc))}[/yellow]"
+                    )
+                    if verbose:
+                        console.print(
+                            f"  [yellow]{inst.name}  failed: {escape(str(exc))}[/yellow]"
+                        )
 
         # ── Phase 2: GUI apps (macOS only, sequential) ───────────────────────
         if not no_apps:
-            progress.update(task, description="Scanning GUI apps …")
+            if not verbose:
+                progress.update(task, description="Scanning GUI apps …")
+            else:
+                console.print("[bold]Scanning GUI apps…[/bold]")
             try:
                 # Reuse brew-cask names already detected in Phase 1 to avoid a
                 # second `brew list --cask` subprocess call.
@@ -178,22 +231,59 @@ def main(
                     name for name, pkg in all_packages.items()
                     if pkg.manager == "brew-cask"
                 )
-                all_packages.update(MacOsAppsDetector(brew_casks=brew_casks).detect())
+                t0 = time.monotonic()
+                macos_result = MacOsAppsDetector(brew_casks=brew_casks).detect()
+                all_packages.update(macos_result)
+                if verbose:
+                    count = len(macos_result)
+                    style = "cyan" if count else "dim"
+                    console.print(
+                        f"  [{style}]macos-apps[/{style}]  "
+                        f"{count} app{'s' if count != 1 else ''}  "
+                        f"[dim]({time.monotonic() - t0:.2f}s)[/dim]"
+                    )
             except Exception as exc:
-                _warnings.append(f"[yellow]Warning: MacOsAppsDetector failed: {exc}[/yellow]")
+                _warnings.append(
+                    f"[yellow]Warning: MacOsAppsDetector failed: {escape(str(exc))}[/yellow]"
+                )
+                if verbose:
+                    console.print(
+                        f"  [yellow]macos-apps  failed: {escape(str(exc))}[/yellow]"
+                    )
 
         # ── Phase 3: manual (needs all managed packages as reference) ────────
         if not no_manual:
-            progress.update(task, description="Scanning PATH for manual installs …")
+            if not verbose:
+                progress.update(task, description="Scanning PATH for manual installs …")
+            else:
+                console.print("[bold]Scanning PATH for manual installs…[/bold]")
             try:
+                t0 = time.monotonic()
                 manual = ManualDetector(managed=all_packages).detect()
                 all_packages.update(manual)
+                if verbose:
+                    count = len(manual)
+                    style = "cyan" if count else "dim"
+                    console.print(
+                        f"  [{style}]manual[/{style}]  "
+                        f"{count} program{'s' if count != 1 else ''}  "
+                        f"[dim]({time.monotonic() - t0:.2f}s)[/dim]"
+                    )
             except Exception as exc:
-                _warnings.append(f"[yellow]Warning: ManualDetector failed: {exc}[/yellow]")
+                _warnings.append(
+                    f"[yellow]Warning: ManualDetector failed: {escape(str(exc))}[/yellow]"
+                )
+                if verbose:
+                    console.print(
+                        f"  [yellow]manual  failed: {escape(str(exc))}[/yellow]"
+                    )
 
         # ── Phase 4: outdated checks (optional, parallel) ────────────────────
         if check_outdated:
-            progress.update(task, description="Checking for updates …")
+            if not verbose:
+                progress.update(task, description="Checking for updates …")
+            else:
+                console.print("[bold]Checking for updates…[/bold]")
             detector_instances = [cls() for cls in INDEPENDENT_DETECTORS]
             tasks_outdated = [
                 (det, {k: v for k, v in all_packages.items() if v.manager == det.name})
@@ -215,18 +305,30 @@ def main(
             max_workers = min(len(tasks_outdated), 8) or 1
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures_out = {
-                    executor.submit(det.check_outdated, pkgs): det.name
+                    executor.submit(_run_check_outdated_timed, det, pkgs): det
                     for det, pkgs in tasks_outdated
                     if pkgs  # skip detectors that found nothing
                 }
                 for future in as_completed(futures_out):
+                    det = futures_out[future]
                     try:
-                        future.result()
+                        elapsed = future.result()
+                        if verbose:
+                            console.print(
+                                f"  [dim]{det.name}  checked  ({elapsed:.2f}s)[/dim]"
+                            )
                     except Exception as exc:
                         _warnings.append(
                             f"[yellow]Warning: outdated check for "
-                            f"{futures_out[future]} failed: {exc}[/yellow]"
+                            f"{det.name} failed: {escape(str(exc))}[/yellow]"
                         )
+                        if verbose:
+                            console.print(
+                                f"  [yellow]{det.name}  check failed: {escape(str(exc))}[/yellow]"
+                            )
+
+    if verbose:
+        console.print(f"\n[dim]Scan completed in {time.monotonic() - t_total:.2f}s[/dim]")
 
     for w in _warnings:
         console.print(w)
