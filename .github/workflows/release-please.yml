@@ -17,6 +17,10 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
@@ -24,22 +28,41 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Debug release-please outputs
+      - name: Diagnose release-please
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
         run: |
-          echo "release_created : ${{ steps.release.outputs.release_created }}"
-          echo "prs_created     : ${{ steps.release.outputs.prs_created }}"
-          echo "pr              : ${{ steps.release.outputs.pr }}"
-          echo "tag_name        : ${{ steps.release.outputs.tag_name }}"
-          echo "token_source    : ${{ secrets.RELEASE_PLEASE_TOKEN != '' && 'RELEASE_PLEASE_TOKEN' || 'github.token (fallback)' }}"
           {
-            echo "## Release Please Diagnostics"
-            echo "| Output | Value |"
-            echo "|--------|-------|"
+            echo "## Release-please Outputs"
+            echo "| Key | Value |"
+            echo "|-----|-------|"
             echo "| \`release_created\` | \`${{ steps.release.outputs.release_created }}\` |"
             echo "| \`prs_created\` | \`${{ steps.release.outputs.prs_created }}\` |"
             echo "| \`pr\` | \`${{ steps.release.outputs.pr }}\` |"
             echo "| \`tag_name\` | \`${{ steps.release.outputs.tag_name }}\` |"
-            echo "| \`token_source\` | \`${{ secrets.RELEASE_PLEASE_TOKEN != '' && 'RELEASE_PLEASE_TOKEN secret' || 'github.token (fallback – RELEASE_PLEASE_TOKEN not set!)' }}\` |"
+            echo "| Token | \`${{ secrets.RELEASE_PLEASE_TOKEN != '' && 'RELEASE_PLEASE_TOKEN' || 'github.token (fallback)' }}\` |"
+            echo ""
+            echo "## Commits since pkgview-v0.4.0"
+            echo "\`\`\`"
+            git log pkgview-v0.4.0..HEAD --oneline 2>&1 || echo "Tag not found!"
+            echo "\`\`\`"
+            echo ""
+            echo "## Token permissions on repo"
+            echo "\`\`\`json"
+            gh api repos/bini93/pkgview --jq '.permissions' 2>&1
+            echo "\`\`\`"
+            echo ""
+            echo "## Branch-creation write test"
+            TEST_SHA=$(git rev-parse HEAD)
+            TEST_BRANCH="diag-write-test-$$"
+            if gh api --method POST repos/bini93/pkgview/git/refs \
+              -f "ref=refs/heads/$TEST_BRANCH" \
+              -f "sha=$TEST_SHA" > /dev/null 2>&1; then
+              echo "Branch creation: SUCCESS (token has write access)"
+              gh api --method DELETE "repos/bini93/pkgview/git/refs/heads/$TEST_BRANCH" > /dev/null 2>&1 || true
+            else
+              echo "Branch creation: FAILED (token missing contents:write or push scope)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
