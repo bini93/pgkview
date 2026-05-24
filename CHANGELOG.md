@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.1](https://github.com/bini93/pkgview/compare/pkgview-v0.3.0...pkgview-v0.3.1) (2026-05-23)
+
+
+### ### Maintenance
+
+* add issue and pull request templates, CODEOWNERS, CONTRIBUTING, and SECURITY documentation ([77156aa](https://github.com/bini93/pkgview/commit/77156aa9b4e1c21db9a2c45f0de7226b03d9ee67))
+
 ## [0.3.0](https://github.com/bini93/pkgview/compare/pkgview-v0.2.0...pkgview-v0.3.0) (2026-05-23)
 
 
