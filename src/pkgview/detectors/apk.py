@@ -47,7 +47,7 @@ class ApkDetector(Detector):
                     version=ver_full,
                     category="cli",
                 )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError, subprocess.CalledProcessError):
             pass
         return packages
 
