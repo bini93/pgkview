@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.5.1](https://github.com/bini93/pkgview/compare/pkgview-v0.5.0...pkgview-v0.5.1) (2026-05-25)
+
+
+### Fixed
+
+* catch CalledProcessError in apk detector ([ac759f0](https://github.com/bini93/pkgview/commit/ac759f06b6b9b3b61d1f2250beef9b2dabf724c9))
+
 ## [0.5.0](https://github.com/bini93/pkgview/compare/pkgview-v0.4.0...pkgview-v0.5.0) (2026-05-25)
 
 
