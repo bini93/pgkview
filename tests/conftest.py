@@ -22,9 +22,12 @@ def reset_pkgview_logging():
     logger = logging.getLogger("pkgview")
     original_level = logger.level
     original_handlers = logger.handlers[:]
+    original_propagate = logger.propagate
 
     logger.handlers.clear()
     logger.setLevel(logging.CRITICAL)
+    # Allow child-logger records to propagate to root so caplog can capture them.
+    logger.propagate = True
 
     yield
 
@@ -32,3 +35,4 @@ def reset_pkgview_logging():
     for handler in original_handlers:
         logger.addHandler(handler)
     logger.setLevel(original_level)
+    logger.propagate = original_propagate

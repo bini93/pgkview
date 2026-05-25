@@ -20,7 +20,7 @@ def _run_with_slow_warning(
     warn_after: float,
     warning: str,
 ) -> "subprocess.CompletedProcess[str] | None":
-    """Run *cmd* and print *warning* to stderr if it hasn't finished within *warn_after* seconds.
+    """Run *cmd* and log a warning if it hasn't finished within *warn_after* seconds.
 
     The full *timeout* is still honoured as a hard cap.  Returns the completed
     process, or ``None`` when the process times out or cannot be started.

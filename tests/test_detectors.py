@@ -541,37 +541,129 @@ class TestSlowWarnings:
         def cancel(self) -> None:
             pass
 
-    def test_brew_emits_warning_when_slow(self, capsys):
-        with patch("pkgview.detectors.macos_apps.threading.Timer", self._ImmediateTimer), \
-             patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="firefox\n", returncode=0)
-            _brew_cask_names()
-        err = capsys.readouterr().err
-        assert "brew list --cask" in err
-        assert "taking longer than expected" in err
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-    def test_brew_no_warning_when_fast(self, capsys):
-        with patch("pkgview.detectors.macos_apps.threading.Timer", self._NeverTimer), \
-             patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="firefox\n", returncode=0)
-            _brew_cask_names()
-        assert capsys.readouterr().err == ""
+    @staticmethod
+    def _capture_logger(name: str):
+        """Return a (handler, orig_level, orig_propagate) tuple after
+        installing a MemoryHandler on *name* that stores getMessage() output.
+        Caller is responsible for cleanup via _restore_logger().
+        """
+        import logging
 
-    def test_spotlight_emits_warning_when_slow(self, capsys):
-        with patch("pkgview.detectors.macos_apps.threading.Timer", self._ImmediateTimer), \
-             patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="/Applications/Safari.app\n", returncode=0)
-            _spotlight_find_app_paths()
-        err = capsys.readouterr().err
-        assert "mdfind" in err or "Spotlight" in err
-        assert "taking longer than expected" in err
+        class _MemHandler(logging.Handler):
+            def __init__(self) -> None:
+                super().__init__(logging.WARNING)
+                self.messages: list[str] = []
 
-    def test_spotlight_no_warning_when_fast(self, capsys):
-        with patch("pkgview.detectors.macos_apps.threading.Timer", self._NeverTimer), \
-             patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="/Applications/Safari.app\n", returncode=0)
-            _spotlight_find_app_paths()
-        assert capsys.readouterr().err == ""
+            def emit(self, record: logging.LogRecord) -> None:
+                self.messages.append(record.getMessage())
+
+        target = logging.getLogger(name)
+        h = _MemHandler()
+        orig_level = target.level
+        orig_propagate = target.propagate
+        target.setLevel(logging.WARNING)
+        target.addHandler(h)
+        target.propagate = False
+        return target, h, orig_level, orig_propagate
+
+    @staticmethod
+    def _restore_logger(
+        target,  # noqa: ANN001
+        h,  # noqa: ANN001
+        orig_level: int,
+        orig_propagate: bool,
+    ) -> None:
+        import logging  # noqa: F401
+
+        target.removeHandler(h)
+        target.setLevel(orig_level)
+        target.propagate = orig_propagate
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+
+    def test_brew_emits_warning_when_slow(self) -> None:
+        target, h, orig_level, orig_propagate = self._capture_logger(
+            "pkgview.detectors.macos_apps"
+        )
+        try:
+            with (
+                patch(
+                    "pkgview.detectors.macos_apps.threading.Timer",
+                    self._ImmediateTimer,
+                ),
+                patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run,
+            ):
+                mock_run.return_value = MagicMock(stdout="firefox\n", returncode=0)
+                _brew_cask_names()
+        finally:
+            self._restore_logger(target, h, orig_level, orig_propagate)
+        assert any("brew list --cask" in m for m in h.messages)
+        assert any("taking longer than expected" in m for m in h.messages)
+
+    def test_brew_no_warning_when_fast(self) -> None:
+        target, h, orig_level, orig_propagate = self._capture_logger(
+            "pkgview.detectors.macos_apps"
+        )
+        try:
+            with (
+                patch(
+                    "pkgview.detectors.macos_apps.threading.Timer",
+                    self._NeverTimer,
+                ),
+                patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run,
+            ):
+                mock_run.return_value = MagicMock(stdout="firefox\n", returncode=0)
+                _brew_cask_names()
+        finally:
+            self._restore_logger(target, h, orig_level, orig_propagate)
+        assert not h.messages
+
+    def test_spotlight_emits_warning_when_slow(self) -> None:
+        target, h, orig_level, orig_propagate = self._capture_logger(
+            "pkgview.detectors.macos_apps"
+        )
+        try:
+            with (
+                patch(
+                    "pkgview.detectors.macos_apps.threading.Timer",
+                    self._ImmediateTimer,
+                ),
+                patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run,
+            ):
+                mock_run.return_value = MagicMock(
+                    stdout="/Applications/Safari.app\n", returncode=0
+                )
+                _spotlight_find_app_paths()
+        finally:
+            self._restore_logger(target, h, orig_level, orig_propagate)
+        assert any("mdfind" in m or "Spotlight" in m for m in h.messages)
+        assert any("taking longer than expected" in m for m in h.messages)
+
+    def test_spotlight_no_warning_when_fast(self) -> None:
+        target, h, orig_level, orig_propagate = self._capture_logger(
+            "pkgview.detectors.macos_apps"
+        )
+        try:
+            with (
+                patch(
+                    "pkgview.detectors.macos_apps.threading.Timer",
+                    self._NeverTimer,
+                ),
+                patch("pkgview.detectors.macos_apps.subprocess.run") as mock_run,
+            ):
+                mock_run.return_value = MagicMock(
+                    stdout="/Applications/Safari.app\n", returncode=0
+                )
+                _spotlight_find_app_paths()
+        finally:
+            self._restore_logger(target, h, orig_level, orig_propagate)
+        assert not h.messages
 
 
 class TestReadAppPlist:
